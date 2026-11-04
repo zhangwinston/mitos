@@ -88,6 +88,8 @@ vcs.workspace = true
 loader.workspace = true
 
 anyhow.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "io-util", "io-std", "time", "process", "macros", "fs", "parking_lot"] }
 tui = { workspace = true, default-features = false, features = ["native"] }
 ui-core.workspace = true
@@ -131,6 +133,10 @@ windows-sys = { workspace = true, features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
+  # IME auto-control (handlers/ime/platform/windows.rs): WM_IME_CONTROL
+  # message-based IME state query/control via the default IME window.
+  "Win32_UI_Input_Ime",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(not(windows))'.dependencies]

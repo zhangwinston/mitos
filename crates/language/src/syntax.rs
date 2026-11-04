@@ -1,6 +1,8 @@
 use crate::queries;
 use editor_core::highlight::{Highlight, HighlightEvent, OverlayHighlights};
 
+mod ime;
+
 #[cfg(test)]
 mod injection_tests;
 #[cfg(test)]
@@ -47,6 +49,8 @@ pub use tree_house::{
     Error as HighlighterError, LanguageLoader, TreeCursor, TREE_SITTER_MATCH_LIMIT,
 };
 
+pub use ime::{detect_ime_sensitive_region, ImeRegionDetection, ImeSensitiveRegion};
+
 static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
 fn next_revision() -> u64 {
     NEXT_REVISION.fetch_add(1, Ordering::Relaxed)
@@ -70,6 +74,10 @@ pub struct LanguageData {
     rainbow_query: OnceLock<Option<RainbowQuery>>,
     spellcheck_query: OnceLock<Option<SpellcheckQuery>>,
     fold_query: OnceLock<Option<FoldQuery>>,
+    /// Cached result of the IME string/comment-type check (see
+    /// [`ime::language_has_string_or_comment_types`]); avoids repeated query
+    /// file reads on the IME cursor-move hot path.
+    has_string_or_comment_types: OnceLock<bool>,
 }
 
 impl LanguageData {
@@ -84,6 +92,7 @@ impl LanguageData {
             rainbow_query: OnceLock::new(),
             spellcheck_query: OnceLock::new(),
             fold_query: OnceLock::new(),
+            has_string_or_comment_types: OnceLock::new(),
         }
     }
 

@@ -330,6 +330,13 @@ pub fn test_editor_config() -> editor_config::Config {
     config.lsp.enable = false;
     config.lsp.document_highlight.auto_trigger = false;
     config.completion.word.enable = false;
+    // IME auto-control keeps its state in process-global singletons keyed
+    // by (DocumentId, ViewId). Every test builds a fresh `Application`
+    // that reuses those IDs from 1, so parallel tests would clobber each
+    // other's IME contexts (and the deferred scheduler tasks would fire
+    // into them). The IME tests re-enable this per-test; see
+    // `ime_test_config` in tests/test/ime.rs.
+    config.ime_auto_control = false;
     // Trust everything implicitly so tests don't hit popups.
     config.workspace_trust.level = ImplicitTrustLevelConfig::Insecure;
     config

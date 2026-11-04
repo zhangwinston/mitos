@@ -305,6 +305,13 @@ where
             }
         }
 
+        // Initialize IME state for all views on startup.
+        // This ensures IME is closed in Normal mode (FR-001).
+        let view_ids: Vec<_> = editor.tree.views().map(|(view, _)| view.id).collect();
+        for view_id in view_ids {
+            handlers::ime::initialize_view_ime_state(&mut editor, view_id);
+        }
+
         #[cfg(windows)]
         let signals = futures_util::stream::pending().boxed();
         #[cfg(not(windows))]

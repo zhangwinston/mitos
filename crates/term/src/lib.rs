@@ -36,6 +36,9 @@ use std::env::var_os;
 use std::process::Stdio;
 
 use futures_util::Future;
+#[cfg(any(test, feature = "integration"))]
+pub mod handlers;
+#[cfg(not(any(test, feature = "integration")))]
 mod handlers;
 
 use stdx::Url;
