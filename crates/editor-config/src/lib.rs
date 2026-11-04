@@ -396,6 +396,9 @@ pub struct Config {
     /// `true` if mitos should automatically add a line comment token if you're currently in a comment
     /// and press `enter`.
     pub continue_comments: bool,
+    /// Whether to automatically enable the system IME in string/comment regions
+    /// and disable it in code regions while in insert mode. Defaults to `true`.
+    pub ime_auto_control: bool,
     /// Whether to display infoboxes. Defaults to true.
     pub auto_info: bool,
     /// Delay in milliseconds before showing help for a pending key sequence.
@@ -1327,6 +1330,7 @@ impl Default for Config {
             text_width: 80,
             idle_timeout: Duration::from_millis(250),
             continue_comments: true,
+            ime_auto_control: true,
             auto_info: true,
             auto_info_delay: Duration::ZERO,
             icons: false,
