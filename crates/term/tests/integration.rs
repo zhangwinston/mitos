@@ -48,6 +48,11 @@ mod test {
     #[cfg(feature = "git")]
     mod git_diff;
     mod goto_hover;
+    mod ime;
+    mod ime_improvements;
+    mod ime_improvements_simple;
+    mod ime_performance;
+    mod ime_platform_tests;
     mod inline_completion;
     mod language_features;
     mod linked_editing;
