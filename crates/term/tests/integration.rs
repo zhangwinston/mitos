@@ -43,6 +43,11 @@ mod test {
     mod formatting;
     #[cfg(feature = "git")]
     mod git_diff;
+    mod ime;
+    mod ime_improvements;
+    mod ime_improvements_simple;
+    mod ime_performance;
+    mod ime_platform_tests;
     mod inline_completion;
     mod language_features;
     mod lsp_alternatives;
