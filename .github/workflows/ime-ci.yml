@@ -107,7 +107,14 @@ jobs:
         run: cargo run --locked --package=grammar-build --bin=grammar-fetch
 
       - name: Bundle grammars
-        run: tar cJf grammars.tar.xz -C runtime/grammars/sources .
+        run: |
+          cd runtime/grammars/sources
+          # Grammar checkouts ship symlinks that Windows tar cannot recreate
+          # (self-referential query links in rpmspec, dangling neovim parser
+          # links, node_modules). grammar-build only reads src/parser.c and
+          # src/scanner.*, never these, so pack real entries only.
+          find . \( -type d -o -type f \) -print0 \
+            | tar --null --no-recursion -cJf ../../../grammars.tar.xz -T -
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
