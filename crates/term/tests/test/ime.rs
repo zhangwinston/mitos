@@ -612,11 +612,12 @@ async fn test_ime_enabled_in_file_without_string_comment_types() -> anyhow::Resu
         let config = language_data.config();
 
         // Check if language has comment tokens
-        let has_comment =
-            config.comment_tokens.is_some() || config.block_comment_tokens.is_some();
+        let has_comment = config.comment_tokens.is_some() || config.block_comment_tokens.is_some();
 
         // Check highlights query for string support
-        let highlight_query = loader.resources().query(&config.language_id, "highlights.scm");
+        let highlight_query = loader
+            .resources()
+            .query(&config.language_id, "highlights.scm");
         let has_string = highlight_query.contains("@string") || highlight_query.contains("string");
 
         // Test region detection at different positions
@@ -685,11 +686,12 @@ async fn test_ime_region_detection_language_without_string_comment() -> anyhow::
         let config = language_data.config();
 
         // Check if language has comment tokens
-        let has_comment =
-            config.comment_tokens.is_some() || config.block_comment_tokens.is_some();
+        let has_comment = config.comment_tokens.is_some() || config.block_comment_tokens.is_some();
 
         // Check highlights query for string support
-        let highlight_query = loader.resources().query(&config.language_id, "highlights.scm");
+        let highlight_query = loader
+            .resources()
+            .query(&config.language_id, "highlights.scm");
         let has_string = highlight_query.contains("@string") || highlight_query.contains("string");
 
         // Test region detection
@@ -912,10 +914,7 @@ async fn test_cursor_move_robust_under_rapid_changes() -> anyhow::Result<()> {
     }
     ime::handle_cursor_move(&mut app.editor, view_id)?;
     let ctx = get_ime_context(doc_id, view_id).unwrap();
-    assert_eq!(
-        ctx.current_region,
-        Some(ImeSensitiveRegion::StringContent)
-    );
+    assert_eq!(ctx.current_region, Some(ImeSensitiveRegion::StringContent));
 
     {
         let doc = view::doc_mut!(app.editor, &doc_id);
@@ -925,10 +924,7 @@ async fn test_cursor_move_robust_under_rapid_changes() -> anyhow::Result<()> {
     }
     ime::handle_cursor_move(&mut app.editor, view_id)?;
     let ctx = get_ime_context(doc_id, view_id).unwrap();
-    assert_eq!(
-        ctx.current_region,
-        Some(ImeSensitiveRegion::CommentContent)
-    );
+    assert_eq!(ctx.current_region, Some(ImeSensitiveRegion::CommentContent));
 
     let snapshot = metrics::snapshot();
     assert!(
