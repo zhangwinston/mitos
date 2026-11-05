@@ -215,8 +215,7 @@ async fn test_large_file_performance() -> anyhow::Result<()> {
     let view_id = app.editor.tree.focus();
 
     // Create a very large file
-    let large_content = "let str = \"测试内容\"; // String content\n"
-        .repeat(5000)
+    let large_content = "let str = \"测试内容\"; // String content\n".repeat(5000)
         + "\n\nfn main() {\n    println!(\"Large file test\");\n}";
 
     let doc_id = overwrite_document_text(&mut app, view_id, &large_content);

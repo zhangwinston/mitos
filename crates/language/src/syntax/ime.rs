@@ -80,7 +80,9 @@ pub(super) fn language_has_string_or_comment_types(loader: &Loader, language: La
         // Check if language has string types by examining highlights query
         // Most languages with string support will have @string captures in highlights.scm
         let has_string = {
-            let highlight_query = loader.resources.query(&config.language_id, "highlights.scm");
+            let highlight_query = loader
+                .resources
+                .query(&config.language_id, "highlights.scm");
             // Check if the query contains @string capture
             highlight_query.contains("@string") || highlight_query.contains("string")
         };

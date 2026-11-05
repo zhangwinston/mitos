@@ -10,9 +10,7 @@
 //! real input method (same treatment as the `ime.rs` tests).
 
 use super::helpers::test_syntax_loader;
-use super::ime::{
-    ime_test_config, ime_test_env, ime_test_env_with, overwrite_document_text,
-};
+use super::ime::{ime_test_config, ime_test_env, ime_test_env_with, overwrite_document_text};
 use editor_core::Selection;
 use std::sync::atomic::Ordering;
 use term::{
@@ -36,10 +34,7 @@ async fn test_ime_platform_detection() -> anyhow::Result<()> {
     // Check if IME is available
     let is_available = platform::is_ime_available();
     println!("  IME Available: {}", is_available);
-    assert!(
-        is_available,
-        "fake platform must report itself available"
-    );
+    assert!(is_available, "fake platform must report itself available");
 
     if is_available {
         // Get IME info
@@ -158,10 +153,7 @@ async fn test_ime_state_operations() -> anyhow::Result<()> {
                         if actual == target {
                             println!("State change verified");
                         } else {
-                            println!(
-                                "State change failed (expected {}, got {})",
-                                target, actual
-                            );
+                            println!("State change failed (expected {}, got {})", target, actual);
                         }
                     }
                     Err(e) => println!("Failed to verify state: {}", e),
