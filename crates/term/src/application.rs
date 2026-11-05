@@ -127,6 +127,22 @@ where
                 }
             }
 
+            // A queued config update can lose its select poll to another
+            // ready branch (ready branches are polled in random order) -
+            // typically the idle timer, which on a loaded machine with the
+            // short test idle timeout is already due again by the time the
+            // update lands. Drain updates here, like the callbacks above, so
+            // no later step of this iteration observes stale settings; the
+            // idle report below in particular must not fire with updates
+            // still queued.
+            if self.apply_pending_config_updates() {
+                self.request_frame();
+                idle_seen = false;
+                if until_idle {
+                    self.editor.reset_idle_timer();
+                }
+            }
+
             if self.editor.should_close() {
                 return false;
             }
