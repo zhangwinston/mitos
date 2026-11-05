@@ -163,8 +163,7 @@ async fn test_ime_context_metrics() -> anyhow::Result<()> {
     // Check metrics increased
     let metrics_after_creation = registry::get_registry_metrics();
     assert!(
-        metrics_after_creation.total_contexts_created()
-            >= initial_metrics.total_contexts_created(),
+        metrics_after_creation.total_contexts_created() >= initial_metrics.total_contexts_created(),
         "Total contexts created should increase"
     );
     assert!(
