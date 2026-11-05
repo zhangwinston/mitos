@@ -1,0 +1,424 @@
+name: IME CI
+
+on:
+  push:
+    branches:
+      - ime
+  workflow_dispatch:
+
+# NOTE: a head commit whose message contains [skip ci] / [ci skip] / [no ci] /
+# [skip actions] suppresses this workflow entirely (GitHub platform behavior,
+# not overridable here), so such pushes produce no CI release.
+
+# Queued per ref: a newer push waits for the in-flight run instead of
+# cancelling it. Cancelling mid-publish could leave an orphan ci-ime-* tag or
+# a partial prerelease behind; queued runs that never start publish nothing,
+# so nothing stale or half-finished is ever released.
+concurrency:
+  group: ime-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MSRV: "1.97.1"
+  # This key can be changed to bust the cache of tree-sitter grammars.
+  GRAMMAR_CACHE_VERSION: ""
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      RUST_BACKTRACE: 1
+      MITOS_LOG_LEVEL: info
+      # sccache can reuse workspace crates across fresh checkouts; incremental
+      # compilation would make those rustc invocations uncacheable.
+      CARGO_INCREMENTAL: '0'
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+
+      - uses: ./.github/actions/rust-setup
+        with:
+          toolchain: ${{ env.MSRV }}
+          cache-key: ime-ci-test
+          cache-grammars: 'true'
+          grammar-cache-version: ${{ env.GRAMMAR_CACHE_VERSION }}
+
+      - name: Run cargo test
+        run: cargo test --workspace --profile integration --locked
+
+      - name: Run process integration tests
+        run: cargo integration-test --locked
+
+  lints:
+    name: Lints
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-setup
+        with:
+          toolchain: ${{ env.MSRV }}
+          components: rustfmt, clippy
+          cache-key: ime-ci-lints
+
+      - name: Run cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Run cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run cargo doc
+        run: cargo doc --no-deps --workspace --document-private-items --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  fetch-grammars:
+    name: Fetch Grammars
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Fetch tree-sitter grammars
+        run: cargo run --locked --package=grammar-build --bin=grammar-fetch
+
+      - name: Bundle grammars
+        run: tar cJf grammars.tar.xz -C runtime/grammars/sources .
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: grammars
+          path: grammars.tar.xz
+
+  dist:
+    name: Dist (${{ matrix.build }})
+    needs: [fetch-grammars]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Emit backtraces on panics.
+      RUST_BACKTRACE: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        # Native builds: no cross-compilation targets, binaries land in
+        # target/opt without a --target triple directory.
+        build: [x86_64-linux, aarch64-macos, x86_64-windows]
+        include:
+          - build: x86_64-linux
+            # WARN: When changing this to a newer version, make sure that the
+            # GLIBC isnt too new, as this can cause issues with portablity on
+            # older systems that dont follow ubuntus more rapid release cadence
+            # (same constraint as release.yml).
+            os: ubuntu-22.04
+          - build: aarch64-macos
+            os: macos-latest
+          - build: x86_64-windows
+            os: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download grammars
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: grammars
+
+      - name: Move grammars under runtime
+        shell: bash
+        run: |
+          mkdir -p runtime/grammars/sources
+          tar xJf grammars.tar.xz -C runtime/grammars/sources
+
+      # The rust-toolchain action ignores rust-toolchain.toml files.
+      # Removing this before building with cargo ensures that the rust-toolchain
+      # is considered the same between installation and usage.
+      - name: Remove the rust-toolchain.toml file
+        run: rm rust-toolchain.toml
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ime-ci-dist
+
+      - name: Compile release grammars
+        run: cargo run --locked --package grammar-build --bin grammar-build
+
+      - name: Build release binary
+        run: cargo build --profile opt --locked
+
+      - name: Collect dist artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/opt/ms.exe" "dist/"
+          else
+            cp "target/opt/ms" "dist/"
+          fi
+          if [ -d runtime/grammars/sources ]; then
+            rm -rf runtime/grammars/sources
+          fi
+          cp -r runtime dist
+
+      # No prebuilt cargo-generate-rpm binaries are published, so install it
+      # from source (cached with the rest of ~/.cargo by rust-cache).
+      - name: Install cargo-generate-rpm
+        if: matrix.build == 'x86_64-linux'
+        run: cargo install cargo-generate-rpm --version 0.21.1 --locked
+
+      - name: Build RPM
+        if: matrix.build == 'x86_64-linux'
+        shell: bash
+        run: |
+          # The RPM Release carries the run number (monotonic, keeps
+          # successive CI builds upgradable via rpm -U) and the short sha
+          # (keeps every build's NEVRA unique).
+          # -p takes the package PATH (the tool does not resolve package names).
+          cargo generate-rpm -p crates/term --profile opt \
+            -s "release = \"${GITHUB_RUN_NUMBER}.g${GITHUB_SHA::10}\"" \
+            -o "dist/mitos-ci-ime-${GITHUB_SHA::10}-x86_64-linux.rpm"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bins-${{ matrix.build }}
+          path: dist
+
+  release:
+    name: Release
+    needs: [test, lints, dist]
+    # Only publish for the ime branch itself: a workflow_dispatch from another
+    # ref still runs tests and builds but must not tag or publish releases.
+    # (No status function in the expression, so the default success() gate of
+    # the needs jobs still applies.)
+    if: github.ref == 'refs/heads/ime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # push the ci-ime-* tag and publish the prerelease
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history for the changelog and for previous ci-ime-* tags.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+
+      - name: Package platform archives
+        shell: bash
+        run: |
+          set -ex
+          tag="ci-ime-${GITHUB_SHA::10}"
+
+          source="$(pwd)"
+          cd "$(mktemp -d)"
+          mv "$source"/bins-* .
+
+          mkdir dist
+          for dir in bins-* ; do
+              platform=${dir#"bins-"}
+              exe=""
+              if [[ $platform =~ "windows" ]]; then
+                  exe=".exe"
+              fi
+              pkgname="mitos-$tag-$platform"
+              mkdir -p "$pkgname"
+              cp "$source/LICENSE" "$source/README.md" "$pkgname"
+              mkdir "$pkgname/contrib"
+              cp -r "$source/contrib/completion" "$pkgname/contrib"
+              mv "bins-$platform/runtime" "$pkgname/"
+              mv "bins-$platform/ms$exe" "$pkgname"
+              chmod +x "$pkgname/ms$exe"
+
+              if [[ "$platform" = "x86_64-linux" ]]; then
+                  mv "bins-$platform"/*.rpm dist/
+              fi
+
+              if [ "$exe" = "" ]; then
+                  tar cJf "dist/$pkgname.tar.xz" "$pkgname"
+              else
+                  7z a -r "dist/$pkgname.zip" "$pkgname"
+              fi
+          done
+          mv dist "$source/"
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+
+      - name: Generate changelog and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA::10}"
+          tag="ci-ime-${short_sha}"
+
+          # Redundant with the fetch-depth: 0 checkout (which already fetches
+          # every tag via its +refs/tags/*:refs/tags/* refspec); kept as a
+          # guard in case fetch-depth is ever lowered.
+          git fetch --tags --force origin
+
+          # Closest previously released CI tag reachable from this commit.
+          prev_tag="$(git describe --tags --abbrev=0 --match 'ci-ime-*' HEAD 2>/dev/null || true)"
+          # On re-runs of the same commit the current tag already points at HEAD;
+          # step over it so the changelog covers everything since the previous
+          # release.
+          if [ -n "$prev_tag" ] && [ "$(git rev-parse "${prev_tag}^{commit}")" = "$GITHUB_SHA" ]; then
+            prev_tag="$(git describe --tags --abbrev=0 --match 'ci-ime-*' "${prev_tag}^" 2>/dev/null || true)"
+          fi
+
+          # On the very first run fall back to the fork point with main.
+          base="${prev_tag}"
+          if [ -z "$base" ]; then
+            base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+          fi
+
+          if [ -n "$base" ]; then
+            range="${base}..HEAD"
+            log_args=("$range")
+            shortstat="$(git diff --shortstat "$base" "$GITHUB_SHA")"
+            dirstat="$(git diff --dirstat=files,0 "$base" "$GITHUB_SHA")"
+          else
+            range=""
+            log_args=(-n 50)
+            shortstat=""
+            dirstat=""
+          fi
+          # Strip backticks from subjects so they cannot unbalance the code
+          # span around the hash, then (re)add that span in sed.
+          commits="$(git log --no-merges --format='%h %s' "${log_args[@]}" \
+            | tr -d '\140' | sed -e 's/^\([0-9a-f]\{7,\}\) /- `\1` /')"
+          [ -n "$commits" ] || commits='- （与上一版本之间没有新提交）'
+
+          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
+          compare_line="首次持续集成发布（还没有历史 CI 标签）。"
+          if [ -n "$prev_tag" ]; then
+            compare_line="与上一版本比较：[\`${prev_tag}...${tag}\`](${repo_url}/compare/${prev_tag}...${tag})"
+          fi
+
+          # Keep markdown table cells from breaking on pipes or unbalanced
+          # backticks in commit metadata.
+          subject="$(git log -1 --format=%s HEAD | tr '|' '/')"
+          subject="${subject//\`/\'}"
+          branch="${GITHUB_REF_NAME//\`/\'}"
+          author="$(git log -1 --format='%an' HEAD | tr '|' '/')"
+
+          {
+            echo "## 持续集成构建（IME 分支）"
+            echo
+            echo "| 项目 | 内容 |"
+            echo "| --- | --- |"
+            echo "| 分支 | \`${branch}\` |"
+            echo "| 提交 | \`${short_sha}\` ${subject} |"
+            echo "| 作者 | ${author} |"
+            echo "| 运行 | [#${GITHUB_RUN_NUMBER}](${run_url}) |"
+            echo "| 标签 | \`${tag}\`（预发布，不会标记为 latest） |"
+            echo
+            echo "### 📦 制品"
+            echo
+            (cd dist && for f in *; do
+              size="$(du -h "$f" | cut -f1)"
+              echo "- \`${f}\`（${size}）"
+            done)
+            echo
+            echo "### 📝 变更清单"
+            echo
+            echo "${compare_line}"
+            echo
+            echo "${commits}"
+            if [ -n "$shortstat" ]; then
+              echo
+              echo "### 📊 变更统计"
+              echo
+              echo "\`${shortstat}\`"
+              echo
+              echo '```'
+              echo "${dirstat}"
+              echo '```'
+            fi
+          } | tee changelog.md >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          {
+            echo "CI_TAG=${tag}"
+            echo "CI_SHORT_SHA=${short_sha}"
+          } >> "$GITHUB_ENV"
+
+          # svenstaro/upload-release-action has no body_path input at this
+          # pin, so the changelog travels through a multiline env var instead.
+          {
+            echo "RELEASE_BODY<<CHANGELOG_EOF"
+            cat changelog.md
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Push CI tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -f "$CI_TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$CI_TAG"
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/*
+          file_glob: true
+          tag: ${{ env.CI_TAG }}
+          release_name: 持续集成 ime@${{ env.CI_SHORT_SHA }}
+          body: ${{ env.RELEASE_BODY }}
+          prerelease: true
+          make_latest: "false"
+          overwrite: true
+
+      - name: Prune old CI releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the newest 15 ci-ime-* prereleases; delete older releases and
+          # their tags so they do not accumulate forever. Keep at least 2 so
+          # the changelog's git describe always finds a previous tag.
+          mapfile -t old < <(gh release list --limit 200 \
+            --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("ci-ime-")))] | sort_by(.createdAt) | reverse | .[15:] | .[].tagName')
+          if [ "${#old[@]}" -eq 0 ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+          for tag in "${old[@]}"; do
+            echo "Pruning ${tag}"
+            gh release delete "$tag" --yes --cleanup-tag \
+              || echo "WARN: failed to prune ${tag}" >&2
+          done
