@@ -33,6 +33,41 @@ assets = [
   { source = "../../contrib/Mitos.desktop", dest = "/usr/share/applications/Mitos.desktop", mode = "644" },
 ]
 
+[package.metadata.generate-rpm]
+# generate an .rpm in target/generate-rpm/ with the command (from the
+# workspace root; -p takes the package PATH, not the crate name):
+# cargo generate-rpm -p crates/term --profile opt
+# The crate is named "term", so the package name must be overridden here.
+name = "mitos"
+# The grammar dylibs are dlopen-only but carry an executable bit on the build
+# host, so the built-in auto-req would run ldd over ~300 of them and emit
+# noisy soname requirements; the ms binary itself only links libc/libgcc.
+# The one real requirement of the grammars is recorded manually below.
+auto-req = "no"
+assets = [
+  { source = "target/release/ms", dest = "/usr/lib/mitos/", mode = "755" },
+  { source = "../../contrib/ms_launcher.sh", dest = "/usr/bin/ms", mode = "755" },
+  # *.so instead of * so neither grammars/sources/ nor .gitkeep is shipped.
+  { source = "../../runtime/grammars/*.so", dest = "/usr/lib/mitos/runtime/grammars/", mode = "644" },
+  { source = "../../runtime/queries/**/*", dest = "/usr/lib/mitos/runtime/queries/", mode = "644" },
+  { source = "../../runtime/themes/**/*", dest = "/usr/lib/mitos/runtime/themes/", mode = "644" },
+  { source = "../../runtime/dictionaries/**/*", dest = "/usr/lib/mitos/runtime/dictionaries/", mode = "644" },
+  { source = "../../runtime/tutor", dest = "/usr/lib/mitos/runtime/tutor", mode = "644" },
+  { source = "../../README.md", dest = "/usr/share/doc/mitos/", mode = "644", doc = true },
+  { source = "../../LICENSE", dest = "/usr/share/doc/mitos/", mode = "644", doc = true },
+  { source = "../../contrib/completion/ms.bash", dest = "/usr/share/bash-completion/completions/ms", mode = "644" },
+  { source = "../../contrib/completion/ms.fish", dest = "/usr/share/fish/vendor_completions.d/ms.fish", mode = "644" },
+  { source = "../../contrib/completion/ms.zsh", dest = "/usr/share/zsh/vendor-completions/_ms", mode = "644" },
+  { source = "../../contrib/Mitos.desktop", dest = "/usr/share/applications/Mitos.desktop", mode = "644" },
+  { source = "../../contrib/Mitos.appdata.xml", dest = "/usr/share/metainfo/Mitos.appdata.xml", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+# All shipped grammar dylibs link libstdc++.so.6 (the ms binary does not);
+# without this entry a target lacking libstdc++ would install cleanly but
+# silently fail to load every grammar.
+"libstdc++" = "*"
+
 [features]
 default = ["git", "syntax-diff"]
 syntax-diff = ["view/syntax-diff"]
