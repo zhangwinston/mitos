@@ -70,10 +70,19 @@ async fn test_improvements_simple() -> anyhow::Result<()> {
 
     println!("✓ All IME improvements verified successfully");
     println!("  Final metrics:");
-    println!("    Total created: {}", final_metrics.total_contexts_created());
-    println!("    Total removed: {}", final_metrics.total_contexts_removed());
+    println!(
+        "    Total created: {}",
+        final_metrics.total_contexts_created()
+    );
+    println!(
+        "    Total removed: {}",
+        final_metrics.total_contexts_removed()
+    );
     println!("    Current contexts: {}", final_metrics.current_contexts());
-    println!("    Max concurrent: {}", final_metrics.max_concurrent_contexts());
+    println!(
+        "    Max concurrent: {}",
+        final_metrics.max_concurrent_contexts()
+    );
     println!("    Cleanup count: {}", final_metrics.cleanup_count());
 
     Ok(())
