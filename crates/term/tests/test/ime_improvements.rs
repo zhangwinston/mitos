@@ -292,7 +292,8 @@ async fn test_multi_view_consistency() -> anyhow::Result<()> {
     ime::handle_cursor_move(&mut app.editor, view1_id)?;
 
     app.editor.set_mode(Mode::Normal);
-    ime::handle_mode_switch(&mut app.editor, view2_id, Mode::Insert, Mode::Normal)?;
+    // No manual handle_mode_switch: set_mode dispatches ModeDidChange, which
+    // the IME controller hook handles for the focused view (view2) already.
 
     // Verify consistency for all views
     let result1 = verify_ime_state_consistency(&app.editor, view1_id);

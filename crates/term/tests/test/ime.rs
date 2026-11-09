@@ -3,7 +3,7 @@
 // waiting on the lock never starves the runtime of the test holding it.
 #![allow(clippy::await_holding_lock)]
 
-use super::helpers::{test_config, test_syntax_loader};
+use super::helpers::{test_config, test_key_sequence, test_syntax_loader, AppBuilder};
 #[allow(unused_imports)]
 use editor_core::{Range, Rope, Selection, Transaction};
 use indoc::indoc;
@@ -14,6 +14,7 @@ use std::sync::{Arc, LazyLock};
 use term::{
     application::TestApplication,
     args::Args,
+    config::Config,
     handlers::ime::{self, metrics, registry},
 };
 use view::{document::Mode, editor::Action, DocumentId, ViewId};
@@ -1281,12 +1282,11 @@ async fn test_scheduler_path_controls_platform_ime() -> anyhow::Result<()> {
     let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let mut stream = UnboundedReceiverStream::new(rx);
 
-    // Enter insert like the real `i` key does: switch the mode, then run the
-    // IME mode-switch handler (the real key dispatches the OnModeSwitch event
-    // which calls this same handler — setting only the mode field without the
-    // handler, or calling only the handler without the mode, is not faithful).
+    // Enter insert like the real `i` key does: switching the mode dispatches
+    // `ModeDidChange` from `Editor::set_mode`, and the IME controller is
+    // hooked directly onto that event — so a plain `set_mode` call is the
+    // full real-key path, no manual handler call required.
     app.editor.set_mode(Mode::Insert);
-    ime::handle_mode_switch(&mut app.editor, view_id, Mode::Normal, Mode::Insert)?;
 
     // The deferred path lands on the editor loop via a job after a 50ms
     // debounce; under a loaded test runner it can arrive arbitrarily late, so
@@ -1376,4 +1376,79 @@ async fn test_live_platform_round_trip() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+/// Regression test for the rebase onto main's custom-command keybindings
+/// (31c563f29): a custom command sequence may switch modes from places the
+/// term-level `OnModeSwitch` never observes — most notably a step resumed
+/// after a deferred `%sh{}` expansion. The IME controller subscribes to
+/// view-level `ModeDidChange` from `Editor::set_mode` instead, so every
+/// real transition runs the exit-insert bookkeeping. Without it, the IME
+/// stayed enabled in Normal mode and CJK keystrokes landed as Normal-mode
+/// commands.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_custom_command_deferred_mode_switch_closes_ime() -> anyhow::Result<()> {
+    let fake = FakeImePlatform::available_and(false);
+    let _ime_env = ime_test_env_with(fake.clone());
+
+    let source = r#"
+[commands]
+":leave" = [":set-register a %sh{printf done}", "normal_mode"]
+[keys.insert]
+C-g = ":leave"
+"#
+    .to_owned();
+    let loaded = Config::load(Ok(&source), Err(term::config::ConfigLoadError::default())).unwrap();
+    let mut config = ime_test_config();
+    config.keys = loaded.keys;
+    config.editor.commands = loaded.editor.commands;
+
+    let mut app = AppBuilder::new().with_config(config).build()?;
+    let view_id = app.editor.tree.focus();
+    let doc_id = overwrite_document_text(
+        &mut app,
+        view_id,
+        indoc! {r#"
+            fn demo() {
+                let code = 99;
+                let text = "你好";
+            }
+        "#},
+    );
+    app.editor.set_document_language(doc_id, Some("rust"))?;
+
+    // Sit inside the string and enter Insert with the platform IME on — the
+    // state of a user typing Chinese. `set_mode` dispatches the same
+    // `ModeDidChange` event the real `i` key's path ends in.
+    {
+        let doc = view::doc_mut!(app.editor, &doc_id);
+        let text_str = doc.text().to_string();
+        let pos = char_offset(&text_str, "你好");
+        doc.set_selection(view_id, Selection::single(pos, pos));
+    }
+    app.editor.set_mode(Mode::Insert);
+    fake.enabled.store(true, Ordering::Release);
+
+    // The custom keybinding runs a shell expansion first; the `normal_mode`
+    // step only executes when the job resumes on the UI loop, after the
+    // keymap command has long returned.
+    test_key_sequence(
+        &mut app,
+        Some("<C-g>"),
+        Some(&|app: &TestApplication| {
+            assert_eq!(
+                app.editor.mode(),
+                Mode::Normal,
+                "the deferred normal_mode step must have run"
+            );
+            assert!(
+                !fake.enabled.load(Ordering::Acquire),
+                "leaving Insert via a custom command sequence must close the IME; \
+                 CJK keystrokes in Normal mode would land as commands"
+            );
+        }),
+        false,
+    )
+    .await
 }
