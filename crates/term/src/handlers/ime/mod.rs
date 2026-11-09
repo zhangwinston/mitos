@@ -21,11 +21,9 @@ use std::sync::{Once, OnceLock};
 use std::time::{Duration, Instant};
 use view::{
     document::{Document, Mode},
-    events::{DocumentDidClose, DocumentDidOpen, SelectionDidChange},
+    events::{DocumentDidClose, DocumentDidOpen, ModeDidChange, SelectionDidChange},
     DocumentId, Editor, ViewId,
 };
-
-use crate::events::OnModeSwitch;
 
 use crate::handlers::ime::platform::{
     initialize, is_ime_enabled, set_ime_enabled, ImeDetector, ImeSettings,
@@ -433,6 +431,7 @@ pub fn handle_mode_switch(
             let loader = doc.syntax_loader();
 
             // Detect IME sensitive region
+            metrics::record_region_detection();
             let detection = detect_ime_sensitive_region(syntax, text, loader, cursor_byte_pos);
 
             // Update context with detected region
@@ -482,6 +481,7 @@ pub fn handle_mode_switch(
         let loader = doc.syntax_loader();
 
         // Detect IME sensitive region (always detect on mode switch)
+        metrics::record_region_detection();
         let detection = detect_ime_sensitive_region(syntax, text, loader, cursor_byte_pos);
         registry::with_context_mut(doc_id, view_id, new_mode, |ctx| {
             ctx.cached_region_span = detection.node_range.and_then(|(start, end)| {
@@ -634,15 +634,21 @@ pub fn register_hooks(events: &event::EventHub) {
         Ok(())
     });
 
-    // Register hook for mode switch (OnModeSwitch)
-    register_hook!(events => move |event: &mut OnModeSwitch<'_, '_>| {
+    // Register hook for mode changes (view-level ModeDidChange).
+    //
+    // Mode switches must reach the IME controller through `Editor::set_mode`'s
+    // own event: it is the single choke point every transition passes through,
+    // emitting exactly once per actual change. The term-level `OnModeSwitch`
+    // only observes net changes around keymap-driven commands, so a custom
+    // command sequence step like `normal_mode` — especially when resumed from
+    // a deferred `%sh{}` expansion — could switch modes without the exit-insert
+    // bookkeeping ever running, leaving the IME enabled in Normal mode.
+    register_hook!(events => move |event: &mut ModeDidChange<'_>| {
         // Get current view ID
-        let view_id = event.cx.editor.tree.focus();
+        let view_id = event.editor.tree.focus();
 
         // Handle mode switch for IME state update
-        if let Err(e) =
-            handle_mode_switch(event.cx.editor, view_id, event.old_mode, event.new_mode)
-        {
+        if let Err(e) = handle_mode_switch(event.editor, view_id, event.old, event.new) {
             // Silently fail and log errors (FR-019)
             log::error!("Failed to handle mode switch for IME: {}", e);
         }
